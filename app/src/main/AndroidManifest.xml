@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- アプリ内アップデート(GitHub Release から APK を取得してインストール) -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <!-- メールアプリを特定するため、送信先の候補になるアプリを参照できるようにする -->
     <queries>
         <intent>
