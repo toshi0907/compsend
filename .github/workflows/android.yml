@@ -1,0 +1,73 @@
+name: Android CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build debug APK
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Rename APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk compsend.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compsend-build-${{ github.run_number }}
+          path: compsend.apk
+
+  # main への push 時のみ、固定タグ "latest" の Release を最新ビルドで更新する。
+  # 本文の "build_number: N" はアプリ内アップデートのバージョン比較に使う。
+  release:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: release-latest
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: compsend-build-${{ github.run_number }}
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          notes="build_number: ${GITHUB_RUN_NUMBER}
+          commit: ${GITHUB_SHA}"
+          title="CompSend build ${GITHUB_RUN_NUMBER}"
+
+          if current=$(gh release view latest --json body --jq .body 2>/dev/null); then
+            current_build=$(printf '%s\n' "$current" | sed -n 's/^build_number: *\([0-9][0-9]*\).*/\1/p' | head -n1)
+            # 後から完了した古い実行で新しいビルドを上書きしない
+            if [ -n "$current_build" ] && [ "$current_build" -ge "$GITHUB_RUN_NUMBER" ]; then
+              echo "latest は build ${current_build} のため、build ${GITHUB_RUN_NUMBER} での更新をスキップします"
+              exit 0
+            fi
+            # リリースを消さずにタグを移動し、APK と本文を差し替える(ダウンロードURLが404になる時間を作らない)
+            gh api -X PATCH "repos/${GH_REPO}/git/refs/tags/latest" -f sha="$GITHUB_SHA" -F force=true
+            gh release upload latest compsend.apk --clobber
+            gh release edit latest --title "$title" --notes "$notes"
+          else
+            gh release create latest compsend.apk --target "$GITHUB_SHA" --title "$title" --notes "$notes"
+          fi
