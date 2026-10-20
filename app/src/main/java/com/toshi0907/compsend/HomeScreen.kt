@@ -29,7 +29,6 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -54,9 +53,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.lifecycle.withResumed
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -88,47 +85,13 @@ fun HomeScreen(
     }
     UpdateDialog(updateViewModel)
 
-    val result = viewModel.result
-    val lifecycleOwner = LocalLifecycleOwner.current
     val openMail = { zip: ZipResult ->
-        viewModel.consumeResult()
         try {
             context.startActivity(MailSender.createIntent(context, zip, viewModel.recipient))
+            viewModel.markResultSent()
         } catch (e: ActivityNotFoundException) {
             viewModel.showMessage("メールアプリが見つかりません")
         }
-    }
-    // サイズ超過や除外した写真がある場合は、メールアプリを開く前に確認する
-    val tooLarge = result != null && result.sizeBytes > MailSender.WARN_SIZE_BYTES
-    val needsConfirm = result != null && (tooLarge || result.failedCount > 0)
-    LaunchedEffect(result) {
-        // 圧縮中にアプリを離れた場合は、バックグラウンドからの起動がブロックされないよう復帰を待つ
-        if (result != null && !needsConfirm) {
-            lifecycleOwner.lifecycle.withResumed { openMail(result) }
-        }
-    }
-    if (result != null && needsConfirm) {
-        AlertDialog(
-            onDismissRequest = viewModel::consumeResult,
-            title = { Text("送信前の確認") },
-            text = {
-                val lines = buildList {
-                    if (result.failedCount > 0) {
-                        add("${result.failedCount}枚の写真を読み込めなかったため除外しました(${result.photoCount}枚を送信します)。")
-                    }
-                    if (tooLarge) {
-                        add(
-                            "zipのサイズが ${Formatter.formatShortFileSize(context, result.sizeBytes)} です。" +
-                                "メールの添付上限を超えて送信できない可能性があります。" +
-                                "長辺や品質を下げるか、写真の枚数を減らすことを検討してください。",
-                        )
-                    }
-                }
-                Text(lines.joinToString("\n\n"))
-            },
-            confirmButton = { TextButton(onClick = { openMail(result) }) { Text("このまま送信") } },
-            dismissButton = { TextButton(onClick = viewModel::consumeResult) { Text("やめる") } },
-        )
     }
 
     val busy = viewModel.progress != null
@@ -215,11 +178,34 @@ fun HomeScreen(
             Text("圧縮中… ${progress.done} / ${progress.total}", style = MaterialTheme.typography.bodySmall)
         }
 
-        Button(
-            onClick = viewModel::compress,
-            modifier = Modifier.fillMaxWidth(),
-            enabled = !busy && viewModel.photos.isNotEmpty() && !invalid,
-        ) { Text("圧縮してメールで送信") }
+        val result = viewModel.result
+        val upToDate = viewModel.isResultUpToDate
+        if (result != null) {
+            ResultCard(result = result, upToDate = upToDate)
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            val compressEnabled = !busy && viewModel.photos.isNotEmpty()
+            // 作成済みのzipが最新なら、次の操作は送信なので圧縮ボタンは控えめに表示する
+            if (upToDate) {
+                OutlinedButton(
+                    onClick = viewModel::compress,
+                    modifier = Modifier.weight(1f),
+                    enabled = compressEnabled,
+                ) { Text("再圧縮") }
+            } else {
+                Button(
+                    onClick = viewModel::compress,
+                    modifier = Modifier.weight(1f),
+                    enabled = compressEnabled,
+                ) { Text("圧縮") }
+            }
+            Button(
+                onClick = { result?.let { openMail(it.zip) } },
+                modifier = Modifier.weight(1f),
+                enabled = !busy && upToDate && !invalid,
+            ) { Text("メールで送信") }
+        }
 
         Row(
             modifier = Modifier.align(Alignment.CenterHorizontally),
@@ -234,6 +220,56 @@ fun HomeScreen(
                 Text(
                     text = if (updateViewModel.checking) "確認中…" else "更新を確認",
                     style = MaterialTheme.typography.labelSmall,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ResultCard(result: Compressed, upToDate: Boolean) {
+    val context = LocalContext.current
+    val zip = result.zip
+    val tooLarge = zip.sizeBytes > MailSender.WARN_SIZE_BYTES
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                text = "zip: ${Formatter.formatShortFileSize(context, zip.sizeBytes)}(${zip.photoCount}枚)",
+                style = MaterialTheme.typography.titleMedium,
+            )
+            val longSide = if (result.maxLongSide == 0) "原寸" else "${result.maxLongSide}px"
+            Text(
+                text = "長辺 $longSide / 品質 ${result.quality}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (zip.failedCount > 0) {
+                Text(
+                    text = "${zip.failedCount}枚の写真を読み込めなかったため除外しました。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            if (tooLarge) {
+                Text(
+                    text = "メールの添付上限を超えて送信できない可能性があります。" +
+                        "長辺や品質を下げるか、写真の枚数を減らして再圧縮してください。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            if (!upToDate) {
+                Text(
+                    text = "写真または設定が変更されています。送信するには再度圧縮してください。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
                 )
             }
         }

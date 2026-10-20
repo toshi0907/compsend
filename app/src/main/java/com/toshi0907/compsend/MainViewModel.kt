@@ -16,6 +16,14 @@ import kotlinx.coroutines.withContext
 
 data class Progress(val done: Int, val total: Int)
 
+/** 作成済みのzipと、作成時の写真・設定。 */
+data class Compressed(
+    val zip: ZipResult,
+    val photos: List<Uri>,
+    val maxLongSide: Int,
+    val quality: Int,
+)
+
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val settings = SettingsRepository(application)
 
@@ -32,9 +40,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     var progress by mutableStateOf<Progress?>(null)
         private set
 
-    /** 作成済みで、まだメールアプリに渡していないzip。 */
-    var result by mutableStateOf<ZipResult?>(null)
+    /** 直近に作成したzip。写真や設定を変えても、比較用にサイズを表示し続ける。 */
+    var result by mutableStateOf<Compressed?>(null)
         private set
+
+    /** 直近のzipをメールアプリに渡したか。渡していないzipは再圧縮時に削除する。 */
+    private var resultSent = false
+
+    /** 直近のzipが、現在の写真・設定で作成したものか。 */
+    val isResultUpToDate: Boolean
+        get() = result?.let {
+            it.photos == photos.toList() && it.maxLongSide == maxLongSide && it.quality == quality
+        } ?: false
 
     var message by mutableStateOf<String?>(null)
         private set
@@ -69,21 +86,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun compress() {
         if (photos.isEmpty() || progress != null) return
         val uris = photos.toList()
+        val targetLongSide = maxLongSide
+        val targetQuality = quality
         progress = Progress(0, uris.size)
         viewModelScope.launch {
             try {
                 val zip = PhotoCompressor.compressToZip(
                     getApplication(),
                     uris,
-                    maxLongSide,
-                    quality,
+                    targetLongSide,
+                    targetQuality,
                 ) { done ->
                     withContext(Dispatchers.Main) { progress = Progress(done, uris.size) }
                 }
                 if (zip == null) {
                     message = "写真を読み込めませんでした"
                 } else {
-                    result = zip
+                    discardUnsentResult()
+                    result = Compressed(zip, uris, targetLongSide, targetQuality)
+                    resultSent = false
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -95,8 +116,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun consumeResult() {
-        result = null
+    fun markResultSent() {
+        resultSent = true
+    }
+
+    private suspend fun discardUnsentResult() {
+        val old = result ?: return
+        if (!resultSent) withContext(Dispatchers.IO) { old.zip.file.delete() }
     }
 
     fun consumeMessage() {
