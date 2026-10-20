@@ -86,19 +86,30 @@ fun HomeScreen(
             viewModel.showMessage("メールアプリが見つかりません")
         }
     }
+    // サイズ超過や除外した写真がある場合は、メールアプリを開く前に確認する
+    val tooLarge = result != null && result.sizeBytes > MailSender.WARN_SIZE_BYTES
+    val needsConfirm = result != null && (tooLarge || result.failedCount > 0)
     LaunchedEffect(result) {
-        if (result != null && result.sizeBytes <= MailSender.WARN_SIZE_BYTES) openMail(result)
+        if (result != null && !needsConfirm) openMail(result)
     }
-    if (result != null && result.sizeBytes > MailSender.WARN_SIZE_BYTES) {
+    if (result != null && needsConfirm) {
         AlertDialog(
             onDismissRequest = viewModel::consumeResult,
-            title = { Text("サイズが大きいです") },
+            title = { Text("送信前の確認") },
             text = {
-                Text(
-                    "zipのサイズが ${Formatter.formatShortFileSize(context, result.sizeBytes)} です。" +
-                        "メールの添付上限を超えて送信できない可能性があります。" +
-                        "長辺や品質を下げるか、写真の枚数を減らすことを検討してください。",
-                )
+                val lines = buildList {
+                    if (result.failedCount > 0) {
+                        add("${result.failedCount}枚の写真を読み込めなかったため除外しました(${result.photoCount}枚を送信します)。")
+                    }
+                    if (tooLarge) {
+                        add(
+                            "zipのサイズが ${Formatter.formatShortFileSize(context, result.sizeBytes)} です。" +
+                                "メールの添付上限を超えて送信できない可能性があります。" +
+                                "長辺や品質を下げるか、写真の枚数を減らすことを検討してください。",
+                        )
+                    }
+                }
+                Text(lines.joinToString("\n\n"))
             },
             confirmButton = { TextButton(onClick = { openMail(result) }) { Text("このまま送信") } },
             dismissButton = { TextButton(onClick = viewModel::consumeResult) { Text("やめる") } },
@@ -192,7 +203,7 @@ fun HomeScreen(
         Button(
             onClick = viewModel::compress,
             modifier = Modifier.fillMaxWidth(),
-            enabled = !busy && viewModel.photos.isNotEmpty(),
+            enabled = !busy && viewModel.photos.isNotEmpty() && !invalid,
         ) { Text("圧縮してメールで送信") }
 
         Text(

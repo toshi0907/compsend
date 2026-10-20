@@ -83,15 +83,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (zip == null) {
                     message = "写真を読み込めませんでした"
                 } else {
-                    if (zip.failedCount > 0) {
-                        message = "${zip.failedCount}枚の写真を読み込めなかったため除外しました"
-                    }
                     result = zip
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                message = "圧縮に失敗しました: ${e.message}"
+                message = "圧縮に失敗しました" + (e.message?.let { ": $it" } ?: "")
             } finally {
                 progress = null
             }

@@ -11,6 +11,7 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.zip.Deflater
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import kotlin.math.max
@@ -23,12 +24,14 @@ data class ZipResult(
     val file: File,
     val photoCount: Int,
     val failedCount: Int,
-) {
-    val sizeBytes: Long get() = file.length()
-}
+    val sizeBytes: Long,
+)
 
 object PhotoCompressor {
     private const val SHARE_DIR = "share"
+
+    /** メールアプリが下書きから後で読み込むことがあるため、直前のzipはすぐには消さない。 */
+    private const val KEEP_MILLIS = 24L * 60 * 60 * 1000
 
     /**
      * 写真をリサイズ・JPEG再エンコードして1つのzipにまとめる。
@@ -42,11 +45,9 @@ object PhotoCompressor {
         quality: Int,
         onProgress: suspend (done: Int) -> Unit,
     ): ZipResult? = withContext(Dispatchers.IO) {
-        // 前回送信分は不要なので毎回作り直す
-        val dir = File(context.cacheDir, SHARE_DIR).apply {
-            deleteRecursively()
-            mkdirs()
-        }
+        val dir = File(context.cacheDir, SHARE_DIR).apply { mkdirs() }
+        val now = System.currentTimeMillis()
+        dir.listFiles()?.filter { now - it.lastModified() > KEEP_MILLIS }?.forEach { it.delete() }
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val zipFile = File(dir, "photos_$timestamp.zip")
 
@@ -54,6 +55,8 @@ object PhotoCompressor {
         var failed = 0
         try {
             ZipOutputStream(zipFile.outputStream().buffered()).use { zip ->
+                // JPEGは圧縮済みで縮まないため、再圧縮のCPUコストを掛けない
+                zip.setLevel(Deflater.NO_COMPRESSION)
                 uris.forEachIndexed { index, uri ->
                     ensureActive()
                     // エントリ途中で失敗してzipが壊れないよう、先にメモリ上でエンコードする
@@ -78,7 +81,7 @@ object PhotoCompressor {
             zipFile.delete()
             null
         } else {
-            ZipResult(zipFile, success, failed)
+            ZipResult(zipFile, success, failed, zipFile.length())
         }
     }
 
