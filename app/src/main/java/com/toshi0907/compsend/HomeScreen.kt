@@ -54,7 +54,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.withResumed
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -78,6 +80,7 @@ fun HomeScreen(
     }
 
     val result = viewModel.result
+    val lifecycleOwner = LocalLifecycleOwner.current
     val openMail = { zip: ZipResult ->
         viewModel.consumeResult()
         try {
@@ -90,7 +93,10 @@ fun HomeScreen(
     val tooLarge = result != null && result.sizeBytes > MailSender.WARN_SIZE_BYTES
     val needsConfirm = result != null && (tooLarge || result.failedCount > 0)
     LaunchedEffect(result) {
-        if (result != null && !needsConfirm) openMail(result)
+        // 圧縮中にアプリを離れた場合は、バックグラウンドからの起動がブロックされないよう復帰を待つ
+        if (result != null && !needsConfirm) {
+            lifecycleOwner.lifecycle.withResumed { openMail(result) }
+        }
     }
     if (result != null && needsConfirm) {
         AlertDialog(
