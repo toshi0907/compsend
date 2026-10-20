@@ -10,6 +10,7 @@ import java.io.File
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -73,6 +74,8 @@ class UpdateViewModel(application: Application) : AndroidViewModel(application) 
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                // キャンセルで接続を切ると IOException になるため、キャンセル扱いにして状態を戻さない
+                ensureActive()
                 state = UpdateState.Available(info)
                 message = "ダウンロードに失敗しました" + (e.message?.let { ": $it" } ?: "")
             }

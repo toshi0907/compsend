@@ -10,7 +10,9 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
@@ -40,7 +42,9 @@ object UpdateChecker {
             val code = conn.responseCode
             if (code != HttpURLConnection.HTTP_OK) throw IOException("HTTP $code")
             val json = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
-            val build = BUILD_NUMBER_REGEX.find(json.optString("body"))
+            // optString は JSON の null を文字列 "null" にするため、明示的に空扱いにする
+            val body = if (json.isNull("body")) "" else json.getString("body")
+            val build = BUILD_NUMBER_REGEX.find(body)
                 ?.groupValues?.get(1)?.toIntOrNull()
                 ?: throw IOException("ビルド番号が見つかりません")
             val assets = json.getJSONArray("assets")
@@ -60,16 +64,25 @@ object UpdateChecker {
         onProgress: suspend (Float?) -> Unit,
     ): File = withContext(Dispatchers.IO) {
         val dir = clearDownloads(context).apply { mkdirs() }
-        val tmp = File(dir, "$APK_NAME.tmp")
+        // キャンセル済みの古いダウンロードが後から自分の一時ファイルを消しても影響しないよう、毎回別名にする
+        val tmp = File.createTempFile(APK_NAME, ".tmp", dir)
         val apk = File(dir, APK_NAME)
         // browser_download_url は別ホスト(https)へリダイレクトされるが、同一プロトコルなので自動で追従する
         val conn = open(info.apkUrl)
+        // ブロック中の read はコルーチンのキャンセルでは中断されないため、接続を切って抜けさせる
+        val watcher = launch {
+            try {
+                awaitCancellation()
+            } finally {
+                conn.disconnect()
+            }
+        }
         try {
             val code = conn.responseCode
             if (code != HttpURLConnection.HTTP_OK) throw IOException("HTTP $code")
             val total = conn.contentLengthLong.takeIf { it > 0 } ?: info.apkSize.takeIf { it > 0 }
             var done = 0L
-            var lastPercent = -1
+            var lastPercent = Int.MIN_VALUE
             conn.inputStream.use { input ->
                 tmp.outputStream().use { output ->
                     val buffer = ByteArray(64 * 1024)
@@ -79,10 +92,11 @@ object UpdateChecker {
                         if (read < 0) break
                         output.write(buffer, 0, read)
                         done += read
-                        val percent = total?.let { (done * 100 / it).toInt() }
-                        if (percent == null || percent != lastPercent) {
-                            lastPercent = percent ?: -1
-                            onProgress(percent?.let { it / 100f })
+                        // サイズ不明(-1)の場合は最初の1回だけ通知する
+                        val percent = total?.let { (done * 100 / it).toInt() } ?: -1
+                        if (percent != lastPercent) {
+                            lastPercent = percent
+                            onProgress(percent.takeIf { it >= 0 }?.let { it / 100f })
                         }
                     }
                 }
@@ -94,6 +108,7 @@ object UpdateChecker {
             tmp.delete()
             throw e
         } finally {
+            watcher.cancel()
             conn.disconnect()
         }
     }
