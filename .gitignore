@@ -1,0 +1,13 @@
+*.iml
+.gradle/
+/local.properties
+.idea/
+.DS_Store
+build/
+/captures
+.externalNativeBuild/
+.cxx/
+# 署名鍵は原則コミットしないが、デバッグ専用鍵 app/debug.keystore のみ例外としてコミットする
+*.jks
+*.keystore
+!app/debug.keystore

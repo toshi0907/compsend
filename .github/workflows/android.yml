@@ -1,0 +1,59 @@
+name: Android CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build debug APK
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Rename APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk compsend.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compsend-build-${{ github.run_number }}
+          path: compsend.apk
+
+  # main への push 時のみ、固定タグ "latest" の Release を最新ビルドで置き換える。
+  # 本文の "build_number: N" はアプリ内アップデートのバージョン比較に使う。
+  release:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-latest
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: compsend-build-${{ github.run_number }}
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release delete latest --cleanup-tag --yes || true
+          gh release create latest compsend.apk \
+            --target "$GITHUB_SHA" \
+            --title "CompSend build ${GITHUB_RUN_NUMBER}" \
+            --notes "build_number: ${GITHUB_RUN_NUMBER}
+          commit: ${GITHUB_SHA}"

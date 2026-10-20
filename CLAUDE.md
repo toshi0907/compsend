@@ -18,3 +18,11 @@ description を確認し、該当するものがあれば優先的に使って�
 `.claude/skills/` 配下のsymlinkの追加・削除)は、作業内容のコミットに混ぜず、
 該当パスだけを専用のコミット(例: `chore: sync myskills`)として作業ブランチにコミットしてください
 (`git add -A` / `git commit -a` で作業コミットに巻き込まないこと)。
+
+## Android開発の前提
+
+- Kotlin + Compose、パッケージ名 `com.toshi0907.compsend`、minSdk 33。
+- 開発環境には Android SDK がなく、`dl.google.com` にも接続できないため、ローカルの `./gradlew` は最後まで実行できない。
+  検証はコードを読んで行い、実際のビルドは GitHub Actions(`.github/workflows/android.yml`)の結果で確認する。
+- `app/debug.keystore` は署名を固定するためのデバッグ専用の鍵で、意図してコミットしている。
+- ビルド番号には `GITHUB_RUN_NUMBER` を使う(`BuildConfig.BUILD_NUMBER`)。main への push 時に、Release `latest` の本文 `build_number: N` も更新する。
