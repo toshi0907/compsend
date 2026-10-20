@@ -2,4 +2,6 @@
 <paths>
     <!-- メール添付用に作成したzip(PhotoCompressor が cacheDir/share/ に出力) -->
     <cache-path name="share" path="share/" />
+    <!-- アプリ内アップデートでダウンロードしたAPK(UpdateChecker が cacheDir/update/ に出力) -->
+    <cache-path name="update" path="update/" />
 </paths>

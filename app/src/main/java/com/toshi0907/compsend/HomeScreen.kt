@@ -65,6 +65,7 @@ fun HomeScreen(
     onMessage: (String) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: MainViewModel = viewModel(),
+    updateViewModel: UpdateViewModel = viewModel(),
 ) {
     val context = LocalContext.current
     val picker = rememberLauncherForActivityResult(
@@ -78,6 +79,14 @@ fun HomeScreen(
             viewModel.consumeMessage()
         }
     }
+    val updateMessage = updateViewModel.message
+    LaunchedEffect(updateMessage) {
+        if (updateMessage != null) {
+            onMessage(updateMessage)
+            updateViewModel.consumeMessage()
+        }
+    }
+    UpdateDialog(updateViewModel)
 
     val result = viewModel.result
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -212,12 +221,22 @@ fun HomeScreen(
             enabled = !busy && viewModel.photos.isNotEmpty() && !invalid,
         ) { Text("圧縮してメールで送信") }
 
-        Text(
-            text = "Build ${BuildConfig.BUILD_NUMBER} (${BuildConfig.VERSION_NAME})",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        Row(
             modifier = Modifier.align(Alignment.CenterHorizontally),
-        )
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "Build ${BuildConfig.BUILD_NUMBER} (${BuildConfig.VERSION_NAME})",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            TextButton(onClick = { updateViewModel.check() }, enabled = !updateViewModel.checking) {
+                Text(
+                    text = if (updateViewModel.checking) "確認中…" else "更新を確認",
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
+        }
     }
 }
 
