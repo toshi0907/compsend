@@ -63,7 +63,8 @@ object PhotoCompressor {
                     val jpeg = runCatching { encodeJpeg(context, uri, maxLongSide, quality) }.getOrNull()
                     if (jpeg != null) {
                         success++
-                        zip.putNextEntry(ZipEntry("photo_%03d.jpg".format(Locale.US, success)))
+                        // 別のzipの写真と同じ名前にならないよう、zipと同じ日時を付ける
+                        zip.putNextEntry(ZipEntry("photo_${timestamp}_%03d.jpg".format(Locale.US, success)))
                         zip.write(jpeg)
                         zip.closeEntry()
                     } else {
